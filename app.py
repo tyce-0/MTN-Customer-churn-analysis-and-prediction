@@ -6,6 +6,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import pickle
+import joblib
 import os
 from pathlib import Path
 
@@ -35,26 +36,34 @@ def load_model_and_encoders():
         
         for path in model_files:
             if os.path.exists(path) and '_metadata' not in path:
+                loaded_obj = None
+                # First try pickle
                 try:
                     with open(path, 'rb') as f:
                         loaded_obj = pickle.load(f)
-                    
-                    # Check if it's a valid model (has predict method)
-                    if hasattr(loaded_obj, 'predict'):
-                        model = loaded_obj
-                        print(f"✅ Loaded model directly: {path}")
-                    elif isinstance(loaded_obj, dict) and 'model' in loaded_obj:
-                        model = loaded_obj['model']
-                        print(f"✅ Loaded model from dict structure: {path}")
-                    else:
-                        print(f"⚠️ Skipping {path}: Not a valid model")
+                    print(f"✅ Loaded with pickle: {path}")
+                except Exception as e_pickle:
+                    # If pickle fails, try joblib (common for sklearn/joblib saved files)
+                    try:
+                        loaded_obj = joblib.load(path)
+                        print(f"✅ Loaded with joblib: {path}")
+                    except Exception as e_joblib:
+                        print(f"⚠️ Failed to load {path} with pickle ({e_pickle}) and joblib ({e_joblib})")
                         continue
-                    
-                    model_path = path
-                    break
-                except Exception as e:
-                    print(f"⚠️ Failed to load {path}: {e}")
+
+                # Check if it's a valid model (has predict method)
+                if hasattr(loaded_obj, 'predict'):
+                    model = loaded_obj
+                    print(f"✅ Using model: {path}")
+                elif isinstance(loaded_obj, dict) and 'model' in loaded_obj:
+                    model = loaded_obj['model']
+                    print(f"✅ Extracted model from dict structure: {path}")
+                else:
+                    print(f"⚠️ Skipping {path}: Not a valid model object")
                     continue
+
+                model_path = path
+                break
         
         if model is None:
             raise FileNotFoundError("No trained model found. Please run main.py first.")
