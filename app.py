@@ -20,7 +20,6 @@ st.set_page_config(
     layout="wide"
 )
 
-@st.cache_resource
 def load_model_and_encoders():
     """Load the trained model and encoders"""
     try:
@@ -31,18 +30,31 @@ def load_model_and_encoders():
         if not models_dir.exists():
             raise FileNotFoundError(f"Models directory not found: {models_dir}")
 
-        # Priority: tuned models first, then base models
-        model_files = sorted(models_dir.glob('*_tuned.pkl')) + sorted(models_dir.glob('*_base.pkl'))
+        all_pkl_files = [p for p in sorted(models_dir.glob('*.pkl')) if p.name not in {'encoders.pkl'}]
+        model_files = [p for p in all_pkl_files if '_metadata' not in p.name]
+
+        if not model_files:
+            available = [p.name for p in all_pkl_files]
+            raise FileNotFoundError(
+                "No trained model found. Please run main.py first. "
+                f"Available PIK files: {available}"
+            )
+
+        tuned_files = [p for p in model_files if p.name.endswith('_tuned.pkl')]
+        base_files = [p for p in model_files if p.name.endswith('_base.pkl')]
+        other_files = [p for p in model_files if p not in tuned_files + base_files]
+        candidate_paths = tuned_files + base_files + other_files
+
         model = None
         model_path = None
 
-        for candidate_path in model_files:
-            if '_metadata' in candidate_path.name:
-                continue
+        for candidate_path in candidate_paths:
             try:
+                loaded_obj = None
                 with open(candidate_path, 'rb') as f:
                     try:
                         loaded_obj = pickle.load(f)
+                        print(f"pickle loaded: {candidate_path}")
                     except Exception as pickle_exc:
                         if joblib is None:
                             raise ImportError(
@@ -50,15 +62,16 @@ def load_model_and_encoders():
                                 "Install it via requirements.txt and redeploy."
                             ) from pickle_exc
                         loaded_obj = joblib.load(candidate_path)
+                        print(f"joblib loaded: {candidate_path}")
 
                 if hasattr(loaded_obj, 'predict'):
                     model = loaded_obj
-                    print(f"Loaded model directly: {candidate_path}")
+                    print(f"Selected model: {candidate_path}")
                 elif isinstance(loaded_obj, dict) and 'model' in loaded_obj and hasattr(loaded_obj['model'], 'predict'):
                     model = loaded_obj['model']
-                    print(f"Loaded model from dict structure: {candidate_path}")
+                    print(f"Selected model from dict: {candidate_path}")
                 else:
-                    print(f"Skipping {candidate_path}: Not a valid model object")
+                    print(f"Skipping {candidate_path}: invalid model object ({type(loaded_obj)})")
                     continue
 
                 model_path = str(candidate_path)
@@ -68,9 +81,9 @@ def load_model_and_encoders():
                 continue
 
         if model is None:
-            available = [p.name for p in model_files if '_metadata' not in p.name]
+            available = [p.name for p in model_files]
             raise FileNotFoundError(
-                "No trained model found. Please run main.py first. "
+                "No trained model could be loaded. Please run main.py first. "
                 f"Available files: {available}"
             )
 
